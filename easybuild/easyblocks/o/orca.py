@@ -1,5 +1,5 @@
 ##
-# Copyright 2021-2023 Vrije Universiteit Brussel
+# Copyright 2021-2024 Vrije Universiteit Brussel
 #
 # This file is part of EasyBuild,
 # originally created by the HPC team of Ghent University (http://ugent.be/hpc/en),
@@ -29,13 +29,14 @@ EasyBuild support for ORCA, implemented as an easyblock
 """
 import glob
 import os
+import stat
 
 from easybuild.tools import LooseVersion
 from easybuild.easyblocks.generic.makecp import MakeCp
 from easybuild.easyblocks.generic.packedbinary import PackedBinary
 from easybuild.framework.easyconfig import CUSTOM
 from easybuild.tools.build_log import EasyBuildError
-from easybuild.tools.filetools import write_file
+from easybuild.tools.filetools import write_file, adjust_permissions
 from easybuild.tools.py2vs3 import string_type
 from easybuild.tools.systemtools import X86_64, get_cpu_architecture
 
@@ -56,6 +57,7 @@ class EB_ORCA(PackedBinary, MakeCp):
 
         # files_to_copy is not mandatory here, since we set it by default in install_step
         extra_vars['files_to_copy'][2] = CUSTOM
+        extra_vars['xtb_integration'] = [False, "Include wrapper script for integrating with xtb (must be installed separately)", CUSTOM]
 
         return extra_vars
 
@@ -86,18 +88,42 @@ class EB_ORCA(PackedBinary, MakeCp):
                 (['auto*', 'orca*', 'otool*'], 'bin'),
                 (['*.pdf'], 'share'),
             ]
-            # Version 5 extra files
-            if LooseVersion(self.version) >= LooseVersion('5.0.0'):
-                compoundmethods = (['ORCACompoundMethods'], 'bin')
-                files_to_copy.append(compoundmethods)
-            # Shared builds have additional libraries
-            libs_to_copy = (['liborca*'], 'lib')
-            if all([glob.glob(p) for p in libs_to_copy[0]]):
-                files_to_copy.append(libs_to_copy)
+
+            # Version 6 extra files
+            if LooseVersion(self.version) >= LooseVersion('6.0.0'):
+                files_to_copy.extend(['datasets', 'lib', (['CompoundScripts'], 'bin')])
+
+            else:
+                # Version 5 extra files
+                if LooseVersion(self.version) >= LooseVersion('5.0.0'):
+                    compoundmethods = (['ORCACompoundMethods'], 'bin')
+                    files_to_copy.append(compoundmethods)
+
+                # Shared builds have additional libraries
+                libs_to_copy = (['liborca*'], 'lib')
+                if all([glob.glob(p) for p in libs_to_copy[0]]):
+                    files_to_copy.append(libs_to_copy)
 
             self.cfg['files_to_copy'] = files_to_copy
 
         MakeCp.install_step(self)
+
+        if self.cfg['xtb_integration']:
+            # Add additional xtb wrapper
+            xtb_wrapper = """
+#!/usr/bin/env bash --login
+XTB_LOCATION=$(which xtb)
+if [ -x "$XTB_LOCATION" ]; then
+    xtb "$@"
+else
+    echo "ERROR: xtb is being used in ORCA, but cannot be found on the path. Make sure that the xtb module is loaded"
+    exit 1
+fi
+"""
+            xtb_wrapper_path = os.path.join(self.installdir, 'bin', 'otool_xtb')
+            write_file(xtb_wrapper_path, xtb_wrapper)
+            perms = stat.S_IXUSR | stat.S_IXGRP
+            adjust_permissions(xtb_wrapper_path, perms, add=True)
 
     def sanity_check_step(self):
         """Custom sanity check for ORCA"""
@@ -136,6 +162,9 @@ class EB_ORCA(PackedBinary, MakeCp):
             else:
                 # Minimal check of files (needed by --module-only)
                 custom_paths['files'] = ['bin/orca']
+            
+            if self.cfg['xtb_integration']:
+                custom_paths['files'].append(os.path.join('bin', 'otool_xtb'))
 
         # Simple test: HF energy of water molecule
         test_input_content = """
