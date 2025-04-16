@@ -1,5 +1,5 @@
 ##
-# Copyright 2009-2023 Ghent University
+# Copyright 2009-2024 Ghent University
 #
 # This file is part of EasyBuild,
 # originally created by the HPC team of Ghent University (http://ugent.be/hpc/en),
@@ -217,14 +217,52 @@ class EB_NCL(EasyBlock):
         cmd = "./config/ymkmf"
         run_cmd(cmd, log_all=True, simple=True)
 
+        # Super hacky substitution to fix Makefile being generated with
+        # 1 instead of x86_64 in installpath
+        cmd = "sed -i 's/\/1\//\/x86_64\//g' Makefile"
+        run_cmd(cmd, log_all=True, simple=True)
+
+        # cmd = "sed -i '/\t@$(MAKE) $(MFLAGS) me/d' Makefile"
+        # run_cmd(cmd, log_all=True, simple=True)
+
+        cmd = "make me"
+        run_cmd(cmd, log_all=True, simple=True)
+
+        cmd = "make Makefiles"
+        run_cmd(cmd, log_all=True, simple=True)
+
+        install_list = self.installdir.split('/')
+        arch_loc = install_list.index('x86_64')
+
+        context = install_list[arch_loc - 1:arch_loc+2]
+        context_search = context.copy()
+        context_search[1] = '1'
+
+        cmd = "grep -R '%(grep_search)s' | cut -f1 -d: | sort | uniq | xargs sed -i 's/%(sed_search)s/%(sed_replacement)s/g'" % {
+                'grep_search': '/'.join(context_search),
+                'sed_search': '\/'.join(context_search),
+                'sed_replacement': '\/'.join(context),
+                }
+        run_cmd(cmd, log_all=True, simple=True)
+
+        cmd = "make clean"
+        run_cmd(cmd, log_all=True, simple=True)
+
     def build_step(self):
         """Building is done in install_step."""
-        pass
+        cmd = "%s make -j %s includes %s" % (self.cfg['prebuildopts'], self.cfg['parallel'], self.cfg['buildopts'])
+        run_cmd(cmd, log_all=True, simple=True)
+
+        cmd = "%s make -j %s depend %s" % (self.cfg['prebuildopts'], self.cfg['parallel'], self.cfg['buildopts'])
+        run_cmd(cmd, log_all=True, simple=True)
+
+        cmd = "%s make -j %s all %s" % (self.cfg['prebuildopts'], self.cfg['parallel'], self.cfg['buildopts'])
+        run_cmd(cmd, log_all=True, simple=True)
 
     def install_step(self):
         """Build in install dir using build_step."""
 
-        cmd = "%s make Everything %s" % (self.cfg['preinstallopts'], self.cfg['installopts'])
+        cmd = "%s make install %s" % (self.cfg['preinstallopts'], self.cfg['installopts'])
         run_cmd(cmd, log_all=True, simple=True)
 
     def sanity_check_step(self):
