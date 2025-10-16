@@ -143,6 +143,20 @@ def pick_python_cmd(req_maj_ver=None, req_min_ver=None, max_py_majver=None, max_
                           f"Python version specified in the easyconfig ({max_ver})")
                 return False
 
+        if max_py_majver is not None:
+            if max_py_minver is None:
+                max_majmin_ver = '%s.0' % max_py_majver
+            else:
+                max_majmin_ver = '%s.%s' % (max_py_majver, max_py_minver)
+
+            pyver = det_python_version(python_cmd)
+
+            if LooseVersion(pyver) > LooseVersion(max_majmin_ver):
+                log.debug("Python version (%s) on the system is newer than the maximum supported "
+                          "Python version specified in the easyconfig (%s)",
+                          pyver, max_majmin_ver)
+                return False
+
         # all check passed
         log.debug(f"All check passed for Python command '{python_cmd}'!")
         return True
@@ -409,6 +423,7 @@ class PythonPackage(ExtensionEasyBlock):
                                    "the pip version check. Enabled by default when pip_ignore_installed=True", CUSTOM],
             'pip_verbose': [None, "Pass --verbose to 'pip install' (if pip is used). "
                                   "Enabled by default if the EB option --debug is used.", CUSTOM],
+            'pip_build_isolation': [False, "Do not pass the --no-build-isolation to pip.", CUSTOM],
             'req_py_majver': [None, "Required major Python version (only relevant when using system Python)", CUSTOM],
             'req_py_minver': [None, "Required minor Python version (only relevant when using system Python)", CUSTOM],
             'max_py_majver': [None, "Maximum major Python version (only relevant when using system Python)", CUSTOM],
@@ -676,10 +691,9 @@ class PythonPackage(ExtensionEasyBlock):
                 # (see also https://pip.pypa.io/en/stable/reference/pip/#pep-517-and-518-support);
                 # since we provide all required dependencies already, we disable this via --no-build-isolation
                 if LooseVersion(pip_version) >= LooseVersion('10.0'):
-                    pip_no_build_isolation = self.cfg.get('pip_no_build_isolation', True)
-                    no_build_isolation_flag = '--no-build-isolation'
-                    if pip_no_build_isolation and no_build_isolation_flag not in self.cfg['installopts']:
-                        self.py_installopts.append(no_build_isolation_flag)
+                    if not self.cfg.get('pip_build_isolation', False) and \
+                    '--no-build-isolation' not in self.cfg['installopts']:
+                        self.cfg.update('installopts', '--no-build-isolation')
 
             elif not self.dry_run:
                 raise EasyBuildError("Failed to determine pip version!")
